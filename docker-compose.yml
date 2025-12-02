@@ -1,0 +1,173 @@
+version: '3.8'
+
+services:
+  # --- Base de données vectorielle ---
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: postgres-vector
+    environment:
+      POSTGRES_DB: vectordb
+      POSTGRES_USER: vector
+      POSTGRES_PASSWORD: vectorpass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vector -d vectordb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mcp-network
+
+  # --- Base de métadonnées (PostgreSQL) ---
+  postgres-meta:
+    image: postgres:16-alpine
+    container_name: postgres-meta
+    environment:
+      POSTGRES_DB: metadb
+      POSTGRES_USER: meta
+      POSTGRES_PASSWORD: metapass
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_meta_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meta -d metadb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mcp-network
+
+  # --- Keycloak ---
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.5
+    container_name: keycloak
+    depends_on:
+      postgres-meta:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres-meta:5432/metadb
+      KC_DB_USERNAME: meta
+      KC_DB_PASSWORD: metapass
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: localhost
+      KC_PROXY: edge
+      KC_LOG_LEVEL: info
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+    ports:
+      - "9000:8443"  # HTTPS
+      - "9080:8080"  # HTTP (pour healthcheck interne)
+    volumes:
+      - ./keycloak/realm-config.json:/opt/keycloak/data/import/realm-config.json:ro
+      - ./certs/cert.pem:/etc/x509/https/tls.crt:ro
+      - ./certs/key.pem:/etc/x509/https/tls.key:ro
+    command: 
+      - "start-dev"
+      - "--import-realm"
+      - "--https-certificate-file=/etc/x509/https/tls.crt"
+      - "--https-certificate-key-file=/etc/x509/https/tls.key"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - mcp-network
+
+  # --- MinIO (stockage fichiers) ---
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9001:9000"
+      - "9002:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server --console-address ":9001" /data
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - mcp-network
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: mcp-server/Dockerfile
+    container_name: mcp-server
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: https://keycloak:8443/realms/mcp-realm
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-meta:5432/metadb
+      SPRING_DATASOURCE_USERNAME: meta
+      SPRING_DATASOURCE_PASSWORD: metapass
+      SPRING_VECTOR_DATASOURCE_URL: jdbc:postgresql://postgres:5432/vectordb
+      SPRING_VECTOR_DATASOURCE_USERNAME: vector
+      SPRING_VECTOR_DATASOURCE_PASSWORD: vectorpass
+      SPRING_MINIO_URL: http://minio:9000
+      SPRING_MINIO_ACCESS_KEY: minioadmin
+      SPRING_MINIO_SECRET_KEY: minioadmin123
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-your-api-key-here}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-meta:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  mcp-client:
+    build:
+      context: .
+      dockerfile: mcp-client/Dockerfile
+    container_name: mcp-client
+    ports:
+      - "8081:8081"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-your-api-key-here}
+      SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_AUTHSERVER_ISSUER_URI: https://keycloak:8443/realms/mcp-realm
+      SPRING_AI_MCP_CLIENT_STREAMABLE_HTTP_CONNECTIONS_MATH_SERVER_URL: http://mcp-server:8080/mcp
+    depends_on:
+      - keycloak
+      - mcp-server
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  postgres_data:
+  postgres_meta_data:
+  minio_data:
+
+networks:
+  mcp-network:
+    driver: bridge
+

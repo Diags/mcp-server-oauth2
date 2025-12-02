@@ -1,0 +1,52 @@
+server:
+  port: 0  # Port aléatoire pour les tests
+
+spring:
+  application:
+    name: mcp-client-test
+  
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:test-api-key}
+    
+    mcp:
+      client:
+        type: SYNC
+        initialized: false
+        streamable-http:
+          connections:
+            math-server:
+              url: http://localhost:${mcp.server.port:8080}/mcp
+              oauth2-client-registration-id: authserver-client-credentials
+  
+  security:
+    oauth2:
+      client:
+        registration:
+          authserver-client-credentials:
+            client-id: mcp-client
+            client-secret: secret
+            authorization-grant-type: client_credentials
+            provider: authserver
+            scope: mcp:read,mcp:write
+        
+        provider:
+          authserver:
+            issuer-uri: ${spring.security.oauth2.client.provider.authserver.issuer-uri:http://localhost:9000/realms/mcp-realm}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    org.springframework.security: INFO
+    org.springframework.ai.mcp: INFO
+    com.mcp.client: INFO
+    org.testcontainers: INFO
+

@@ -1,0 +1,52 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: mcp-client
+  
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:your-api-key-here}
+    
+    mcp:
+      client:
+        type: SYNC
+        initialized: false
+        streamable-http:
+          connections:
+            math-server:
+              url: http://localhost:8080/mcp
+              # ⭐ LIEN OBLIGATOIRE avec le client OAuth2
+              oauth2-client-registration-id: authserver-client-credentials  # <--- AJOUTÉ
+  
+  security:
+    oauth2:
+      client:
+        # Un seul client client_credentials suffit
+        registration:
+          authserver-client-credentials:
+            client-id: mcp-client
+            client-secret: secret
+            authorization-grant-type: client_credentials
+            provider: authserver
+            scope: mcp:read,mcp:write  # <--- SIMPLIFIÉ (sans openid)
+        
+        provider:
+          authserver:
+            issuer-uri: https://localhost:9000/realms/mcp-realm
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    org.springframework.security: DEBUG
+    org.springframework.ai.mcp: DEBUG
+    com.mcp.client: DEBUG

@@ -46,7 +46,8 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI:https://localhost:9000/realms/mcp-realm}
+          jwk-set-uri: ${SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI:https://localhost:9000/realms/mcp-realm/protocol/openid-connect/certs}
+          # Utilisation de jwk-set-uri au lieu de issuer-uri pour éviter les problèmes SSL
 
 management:
   endpoints:

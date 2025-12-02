@@ -1,6 +1,33 @@
 version: '3.8'
 
 services:
+  # --- Traefik (Reverse Proxy) ---
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--log.level=DEBUG"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8090:8080"  # Dashboard
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./certs:/certs:ro"
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   # --- Base de données vectorielle ---
   postgres:
     image: pgvector/pgvector:pg16
@@ -104,6 +131,22 @@ services:
     networks:
       - mcp-network
 
+  # --- Redis (pour rate limiting du gateway) ---
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mcp-network
+
   mcp-server:
     build:
       context: .
@@ -162,10 +205,46 @@ services:
       timeout: 10s
       retries: 5
 
+  # --- Gateway Server (API Gateway avec OAuth2) ---
+  gateway-server:
+    build:
+      context: .
+      dockerfile: gateway-server/Dockerfile
+    container_name: gateway-server
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KEYCLOAK_JWK_SET_URI: https://keycloak:8443/realms/mcp-realm/protocol/openid-connect/certs
+      SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_KEYCLOAK_ISSUER_URI: https://keycloak:8443/realms/mcp-realm
+    depends_on:
+      redis:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      mcp-client:
+        condition: service_healthy
+      mcp-server:
+        condition: service_healthy
+      traefik:
+        condition: service_healthy
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gateway.rule=Host(`localhost`) && PathPrefix(`/mcp`)"
+      - "traefik.http.routers.gateway.entrypoints=web"
+      - "traefik.http.services.gateway.loadbalancer.server.port=8082"
+
 volumes:
   postgres_data:
   postgres_meta_data:
   minio_data:
+  redis_data:
 
 networks:
   mcp-network:

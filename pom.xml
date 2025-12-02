@@ -23,6 +23,7 @@
     <modules>
         <module>mcp-server</module>
         <module>mcp-client</module>
+        <module>gateway-server</module>
     </modules>
 
     <properties>
@@ -31,13 +32,14 @@
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-ai.version>1.1.0</spring-ai.version>
-        <spring-cloud.version>2023.0.3</spring-cloud.version>
+        <spring-cloud.version>2024.0.0</spring-cloud.version>
         <testcontainers.version>1.20.4</testcontainers.version>
         <pgvector.version>0.1.5</pgvector.version>
         <minio.version>8.5.12</minio.version>
         <pdfbox.version>3.0.3</pdfbox.version>
         <lombok.version>1.18.34</lombok.version>
         <keycloak-testcontainers.version>3.4.0</keycloak-testcontainers.version>
+        <resilience4j.version>2.2.0</resilience4j.version>
     </properties>
 
     <dependencyManagement>
